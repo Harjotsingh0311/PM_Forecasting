@@ -1,0 +1,46 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "PM: audit data",
+      "type": "shell",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "pm_forecasting.cli", "audit"],
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "PM: prepare data",
+      "type": "shell",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "pm_forecasting.cli", "prepare"],
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "PM: run tests",
+      "type": "shell",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "pytest", "-q"],
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "PM: baselines",
+      "type": "shell",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "pm_forecasting.cli", "baselines"],
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "PM: analysis and report",
+      "type": "shell",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "pm_forecasting.cli", "report"],
+      "group": "build",
+      "problemMatcher": []
+    }
+  ]
+}
+

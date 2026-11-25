@@ -1,0 +1,41 @@
+project:
+  seed: 42
+  output_dir: outputs
+  checkpoint_dir: checkpoints
+
+data:
+  raw_dir: data/raw
+  cache_path: data/processed/dataset.npz
+  metadata_path: data/processed/metadata.json
+  timezone: Europe/Ljubljana
+  timestamps_are_utc: false
+  input_length: 168
+  horizon: 24
+  train_stride: 3
+  eval_stride: 3
+  max_station_missing_pct: 15.0
+
+splits:
+  train_a: ["2024-05-02 20:00:00", "2025-01-05 23:00:00"]
+  val_w: ["2025-01-06 00:00:00", "2025-02-16 23:00:00"]
+  train_b: ["2025-02-17 00:00:00", "2025-08-31 23:00:00"]
+  val_r: ["2025-09-01 00:00:00", "2025-09-30 23:00:00"]
+  test: ["2025-10-01 00:00:00", "2025-12-11 07:00:00"]
+
+model:
+  name: tcn
+  channels: 48
+  hidden_size: 64
+  station_embedding: 8
+  dropout: 0.1
+
+training:
+  seeds: [42, 123]
+  batch_size: 256
+  max_epochs: 30
+  patience: 5
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  gradient_clip: 1.0
+  amp: true
+
