@@ -11,7 +11,8 @@ $seeds = @(42, 123)
 
 foreach ($classicalModel in @("ridge", "lightgbm")) {
     $classicalRun = Join-Path $PSScriptRoot "..\outputs\$classicalModel\seed_42\run.json"
-    if (-not (Test-Path -LiteralPath $classicalRun)) {
+    $classicalEfficiency = Join-Path $PSScriptRoot "..\outputs\$classicalModel\seed_42\efficiency.json"
+    if ((-not (Test-Path -LiteralPath $classicalRun)) -or (-not (Test-Path -LiteralPath $classicalEfficiency))) {
         & $python -m pm_forecasting.cli classical --model $classicalModel --seed 42
     }
 }
@@ -33,6 +34,7 @@ foreach ($model in $models) {
     }
 }
 
+& $python -m pm_forecasting.cli efficiency
 & $python -m pm_forecasting.cli significance
 & $python -m pm_forecasting.cli report
 

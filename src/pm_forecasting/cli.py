@@ -17,9 +17,10 @@ from .config import load_config
 from .data import load_prepared, prepare_data, save_prepared
 from .diagnostics import build_diagnostic_figures, build_diagnostic_tables
 from .evaluate import metric_rows, save_metrics
-from .models import make_model
+from .efficiency import benchmark_efficiency
+from .models import load_compatible_state, make_model
 from .train import forecast_test, train_model
-from .reporting import build_summary
+from .reporting import build_project_report, build_summary
 from .statistics import run_cpge_day_bootstrap, run_dm_tests, run_physical_output_bootstrap
 
 
@@ -42,6 +43,7 @@ def main() -> None:
     subparsers.add_parser("analyze")
     subparsers.add_parser("report")
     subparsers.add_parser("significance")
+    subparsers.add_parser("efficiency")
     classical_parser = subparsers.add_parser("classical")
     classical_parser.add_argument("--model", choices=["ridge", "lightgbm"], required=True)
     classical_parser.add_argument("--seed", type=int, default=42)
@@ -87,10 +89,12 @@ def main() -> None:
         metrics, figure = build_summary(config["project"]["output_dir"])
         tables = build_diagnostic_tables(data, config["project"]["output_dir"])
         figures = build_diagnostic_figures(data, config["project"]["output_dir"])
+        report = build_project_report(config["project"]["output_dir"], "docs/project_report.md")
         print(metrics.to_string(index=False))
         print(f"Figure: {figure}")
         print(f"Diagnostic tables: {tables}")
         print(f"Diagnostic figures: {figures}")
+        print(f"Project report: {report}")
     elif args.command == "classical":
         data = _data(config)
         output_dir = (
@@ -116,6 +120,9 @@ def main() -> None:
         print(physical.to_string(index=False))
         print("\nPhysical-ordering violations")
         print(violations.to_string(index=False))
+    elif args.command == "efficiency":
+        result = benchmark_efficiency(_data(config), config, config["project"]["output_dir"])
+        print(result.to_string(index=False))
     elif args.command == "chronos2":
         metrics = run_chronos2(
             _data(config),
@@ -161,7 +168,7 @@ def main() -> None:
         model = make_model(args.model, data, config).to(device)
         checkpoint_path = Path(config["project"]["checkpoint_dir"]) / f"{args.model}_seed{args.seed}.pt"
         checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
-        model.load_state_dict(checkpoint["model"])
+        load_compatible_state(model, checkpoint["model"], args.model)
         forecasts = forecast_test(model, data, config)
         output_dir = Path(config["project"]["output_dir"]) / args.model / f"seed_{args.seed}"
         output_dir.mkdir(parents=True, exist_ok=True)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import time
 from pathlib import Path
 
 import numpy as np
@@ -92,6 +94,9 @@ def run_classical_baseline(
     mask = np.zeros_like(prediction, dtype=bool)
 
     model_metadata = []
+    training_seconds = 0.0
+    inference_seconds = 0.0
+    model_units = 0
     for horizon in REPORTED_HORIZONS:
         target_time_train = train_origin_values + horizon - 1
         target_time_test = test_origin_values + horizon - 1
@@ -99,11 +104,28 @@ def run_classical_baseline(
         for pollutant in range(2):
             valid_train = data.target_mask[target_time_train, train_stations, pollutant]
             estimator = _make_estimator(name, seed)
+            started = time.perf_counter()
             estimator.fit(
                 x_train[valid_train],
                 data.targets_norm[target_time_train[valid_train], train_stations[valid_train], pollutant],
             )
+            training_seconds += time.perf_counter() - started
+            started = time.perf_counter()
             predicted_norm = estimator.predict(x_test)
+            inference_seconds += time.perf_counter() - started
+            if name == "ridge":
+                model_units += int(estimator.coef_.size + np.asarray(estimator.intercept_).size)
+            else:
+                model_dump = estimator.booster_.dump_model()
+
+                def count_leaves(node: dict) -> int:
+                    if "leaf_index" in node:
+                        return 1
+                    return count_leaves(node["left_child"]) + count_leaves(node["right_child"])
+
+                model_units += sum(
+                    count_leaves(tree["tree_structure"]) for tree in model_dump["tree_info"]
+                )
             means = data.target_log_mean[test_stations, pollutant]
             stds = data.target_log_std[test_stations, pollutant]
             prediction[:, horizon_index, pollutant] = np.maximum(
@@ -139,5 +161,21 @@ def run_classical_baseline(
     metrics = pd.DataFrame(metric_rows(truth, prediction, mask, name))
     metrics.to_csv(output_dir / "metrics.csv", index=False)
     pd.DataFrame(model_metadata).to_csv(output_dir / "models.csv", index=False)
+    (output_dir / "efficiency.json").write_text(
+        json.dumps(
+            {
+                "model": name,
+                "seed": seed,
+                "training_seconds": training_seconds,
+                "inference_seconds": inference_seconds,
+                "samples": n_samples,
+                "milliseconds_per_sample": 1000 * inference_seconds / n_samples,
+                "model_units": model_units,
+                "model_units_label": "coefficients" if name == "ridge" else "tree leaves",
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     return metrics
 

@@ -62,6 +62,13 @@ def run_audit(
     january_peak = float(np.median([row["january_temperature_peak_hour"] for row in station_rows]))
     july_peak = float(np.median([row["july_temperature_peak_hour"] for row in station_rows]))
     numeric = ["PM2.5", "PM10", "temperature", "rain", "pressure", "precipitation", "wind_speed"]
+    precipitation_correlations = (
+        combined[["precipitation", "temperature", "rain", "pressure"]]
+        .corr(numeric_only=True)["precipitation"]
+        .drop("precipitation")
+        .round(6)
+        .to_dict()
+    )
     audit = {
         "station_count": len(stations),
         "rows_per_station": len(timestamps),
@@ -90,6 +97,15 @@ def run_audit(
             > station_missing_cutoff_pct
         ],
         "quantiles": combined[numeric].quantile([0.5, 0.9, 0.99]).round(3).to_dict(),
+        "precipitation_diagnostic": {
+            "correlations": precipitation_correlations,
+            "interpretation": (
+                "The 0-100 column behaves more like relative humidity or a provider "
+                "probability score than measured precipitation: it is inversely related "
+                "to temperature and increases with rain. The upstream semantic remains "
+                "unverified, so the project keeps the source column name."
+            ),
+        },
         "stations": station_rows,
     }
     if output_path is not None:

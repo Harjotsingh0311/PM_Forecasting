@@ -23,6 +23,8 @@ The project is complete and reproducible on a 6 GB NVIDIA RTX 3050. It includes 
 13. [Repository and output guide](#repository-and-output-guide)
 14. [Interview preparation](#interview-preparation)
 15. [Limitations and next steps](#limitations-and-next-steps)
+16. [Reproducibility status](#reproducibility-status)
+17. [References](#references)
 
 ## Thirty-second project explanation
 
@@ -414,7 +416,8 @@ VS Code automatically selects `.venv` through `.vscode/settings.json`. The Comma
 # 7. One neural run
 .\.venv\Scripts\python.exe -m pm_forecasting.cli train --model tcn --seed 42
 
-# 8. Statistics and final report
+# 8. Efficiency, statistics, and final report
+.\.venv\Scripts\python.exe -m pm_forecasting.cli efficiency
 .\.venv\Scripts\python.exe -m pm_forecasting.cli significance
 .\.venv\Scripts\python.exe -m pm_forecasting.cli report
 ```
@@ -433,6 +436,16 @@ Both launchers skip runs that already contain `run.json`. Do not run two copies 
 ```powershell
 .\.venv\Scripts\python.exe -m pm_forecasting.cli evaluate --model cpmtcn --seed 42
 ```
+
+### Do I need to run the PowerShell scripts?
+
+**No, not on this machine.** The scripts have already been run: all 14 core neural runs (7 models × 2 seeds), all 24 controlled cross-value runs, the baselines, Chronos-2 inference, significance tests, efficiency benchmark, diagnostics, and consolidated report are present and verified.
+
+- `scripts/run_core.ps1` is the resumable end-to-end launcher. It audits and prepares the data, runs tests and baselines, fills in any missing model runs, benchmarks efficiency, computes significance tests, and rebuilds the report.
+- `scripts/run_cross_value.ps1` runs the 24 controlled experiments that isolate whether the other particle fraction adds predictive value.
+- Keep both files in GitHub. They are reproducibility entry points, not files that should be deleted after a successful run.
+- Run them only when rebuilding on a fresh clone, recovering a missing run, or deliberately repeating the study. Because generated data, outputs, and checkpoints are Git-ignored, a fresh clone must run them after supplying `data/raw/` and creating the environment.
+- Re-running them here is safe but unnecessary: completed run markers are skipped. Derived audits, tests, efficiency measurements, and report files are intentionally refreshed.
 
 ### RTX 3050 troubleshooting
 
@@ -468,15 +481,17 @@ PM_Forecasting/
 │   ├── statistics.py             # DM and paired whole-day bootstraps
 │   ├── analysis.py               # Ratios, correlations, predictive tests
 │   ├── diagnostics.py            # Peak/month/ratio/gate/episode diagnostics
+│   ├── efficiency.py             # Parameter, training-time, and inference benchmarks
 │   ├── reporting.py              # Combined tables and horizon figure
 │   └── cli.py                    # Command-line entry point
 ├── tests/                        # 15 unit/integration checks
 ├── checkpoints/                  # Generated best validation states
 ├── outputs/                      # Generated forecasts, metrics, tests, figures
+├── docs/project_report.md        # Proposal-aligned five-table/four-figure report
 └── README.md                     # Project report and interview guide
 ```
 
-Generated `data/processed`, `outputs`, and `checkpoints` are intentionally ignored by Git because forecasts and checkpoints can be large. The four final figures are copied into `docs/figures` so the README renders on GitHub.
+Generated `data/processed`, `outputs`, and `checkpoints` are intentionally ignored by Git because forecasts and checkpoints can be large. Final figures are copied into `docs/figures` so the README and report render on GitHub.
 
 Important outputs:
 
@@ -485,6 +500,9 @@ Important outputs:
 | `outputs/audit.json` | Complete project-wide and station-level audit |
 | `outputs/summary_metrics.csv` | Every run's metric rows |
 | `outputs/aggregate_metrics.csv` | Seed means and standard deviations |
+| `outputs/overall_accuracy.csv` | Mean performance across the four reported horizons |
+| `outputs/per_station_metrics.csv` | Model metrics for every station, pollutant, and horizon |
+| `outputs/efficiency.csv` | Parameters/model units, training time, and inference ms/sample |
 | `outputs/diebold_mariano.csv` | Dependence-corrected CP-MTCN vs TCN tests |
 | `outputs/cpge_day_bootstrap.csv` | Gated vs no-exchange day bootstrap |
 | `outputs/physical_output_bootstrap.csv` | Soft vs hard output day bootstrap |
@@ -495,6 +513,9 @@ Important outputs:
 | `outputs/peak_metrics.csv` | Error above training q90 |
 | `outputs/monthly_metrics.csv` | Month-specific performance |
 | `outputs/gates_by_month.csv` | CPGE diagnostic values |
+| `outputs/exchange_share_by_month.csv` | Fraction of each tower update contributed by cross-pollutant exchange |
+| `outputs/exchange_share_by_hour.csv` | Exchange share by local hour and CPGE level |
+| `docs/project_report.md` | Consolidated proposal-aligned report with five result tables and figures |
 
 ## Interview preparation
 
@@ -575,6 +596,18 @@ Recommended next experiments are rolling-origin backtests across seasons, probab
 - Zero-shot Chronos-2 reference: complete, all 11,823 station-origins
 - Significance and whole-day bootstrap analysis: complete
 - Weather-conditioned and nested predictive analysis: complete
+- Per-station, monthly, peak, ratio, and episode diagnostics: complete
+- CPGE gate and actual exchange-share diagnostics by month/hour: complete
+- Parameter count, training-time, and inference-speed benchmark: complete
+- Consolidated proposal report with five result tables and final figures: complete
 - Automated tests: **15 passed**
 - GitHub-visible diagnostics and this interview guide: complete
+
+## References
+
+1. Vrbancic, G. *Air quality dataset*, Mendeley Data, v2. [doi:10.17632/p86hnykz3d.2](https://doi.org/10.17632/p86hnykz3d.2).
+2. Xie, Z.-A., Chow, C.-O., Chuah, J. H., and Raymond, W. J. K. “Multi-pollutant air quality forecasting using bidirectional attention and multi-scale temporal networks.” *Frontiers in Environmental Science* 13:1623630 (2025). [doi:10.3389/fenvs.2025.1623630](https://doi.org/10.3389/fenvs.2025.1623630).
+3. Lu, J. and Sun, S. “A causality-aware spatiotemporal model for multi-region and multi-pollutant air quality forecasting (AirPCM).” [arXiv:2509.21260](https://arxiv.org/abs/2509.21260) (2025).
+4. Badouch, A. and Belhoucine, K. “Benchmarking deep learning for PM2.5 forecasting in IoT-based smart cities.” *IJACSA* 17(5) (2026).
+5. *Chronos-2: From Univariate to Universal Forecasting.* [arXiv:2510.15821](https://arxiv.org/abs/2510.15821) (2025).
 

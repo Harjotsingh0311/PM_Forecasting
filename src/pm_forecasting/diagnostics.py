@@ -22,18 +22,27 @@ def _forecast_files(output_root: Path) -> list[tuple[str, int, Path]]:
         model = path.parent.parent.name
         seed = int(path.parent.name.removeprefix("seed_"))
         result.append((model, seed, path))
+    for model in ("persistence", "seasonal_naive"):
+        path = output_root / "baselines" / f"{model}_forecasts.npz"
+        if path.exists():
+            result.append((model, -1, path))
     return sorted(result)
 
 
 def build_diagnostic_tables(data, output_root: str | Path) -> dict[str, Path]:
     output_root = Path(output_root)
-    peak_rows, monthly_rows = [], []
+    peak_rows, monthly_rows, station_rows = [], [], []
     ratio_rows, gate_month_rows, gate_hour_rows = [], [], []
+    exchange_month_rows, exchange_hour_rows = [], []
     files = _forecast_files(output_root)
     for model, seed, path in files:
         forecast = _load(path)
         prediction, truth, mask = forecast["prediction"], forecast["truth"], forecast["mask"]
-        stations = forecast["station_indices"].astype(int)
+        stations = (
+            forecast["station_indices"].astype(int)
+            if "station_indices" in forecast
+            else np.tile(np.arange(len(data.stations)), len(forecast["origins"]))
+        )
         sample_origins = np.repeat(forecast["origins"], len(data.stations))
         for pollutant, pollutant_name in enumerate(POLLUTANTS):
             for horizon in HORIZONS:
@@ -54,6 +63,32 @@ def build_diagnostic_tables(data, output_root: str | Path) -> dict[str, Path]:
                         }
                     )
                 timestamps = pd.DatetimeIndex(data.timestamps[sample_origins + index])
+                for station_index, station_name in enumerate(data.stations):
+                    selected = valid & (stations == station_index)
+                    if not selected.any():
+                        continue
+                    error = (
+                        prediction[selected, index, pollutant]
+                        - truth[selected, index, pollutant]
+                    )
+                    station_truth = truth[selected, index, pollutant]
+                    denominator = np.square(station_truth - station_truth.mean()).sum()
+                    station_rows.append(
+                        {
+                            "model": model,
+                            "seed": seed,
+                            "station": station_name,
+                            "pollutant": pollutant_name,
+                            "horizon": horizon,
+                            "n": int(selected.sum()),
+                            "mae": float(np.mean(np.abs(error))),
+                            "rmse": float(np.sqrt(np.mean(error**2))),
+                            "r2": float(1 - np.square(error).sum() / denominator)
+                            if denominator > 0
+                            else np.nan,
+                            "bias": float(np.mean(error)),
+                        }
+                    )
                 for month in sorted(set(timestamps.month)):
                     selected = valid & (timestamps.month == month)
                     if not selected.any():
@@ -121,18 +156,51 @@ def build_diagnostic_tables(data, output_root: str | Path) -> dict[str, Path]:
                         }
                     )
 
+            if "exchange_share_values" in forecast:
+                for column, gate_name in enumerate(forecast["gate_names"].astype(str)):
+                    for month in sorted(set(timestamps.month)):
+                        selected = timestamps.month == month
+                        exchange_month_rows.append(
+                            {
+                                "seed": seed,
+                                "gate": gate_name,
+                                "month": int(month),
+                                "mean_exchange_share": float(
+                                    forecast["exchange_share_values"][selected, column].mean()
+                                ),
+                            }
+                        )
+                    for hour in sorted(set(timestamps.hour)):
+                        selected = timestamps.hour == hour
+                        exchange_hour_rows.append(
+                            {
+                                "seed": seed,
+                                "gate": gate_name,
+                                "hour": int(hour),
+                                "mean_exchange_share": float(
+                                    forecast["exchange_share_values"][selected, column].mean()
+                                ),
+                            }
+                        )
+
     paths = {
         "peak": output_root / "peak_metrics.csv",
         "monthly": output_root / "monthly_metrics.csv",
+        "station": output_root / "per_station_metrics.csv",
         "ratio": output_root / "ratio_forecast_by_month.csv",
         "gates_month": output_root / "gates_by_month.csv",
         "gates_hour": output_root / "gates_by_hour.csv",
+        "exchange_month": output_root / "exchange_share_by_month.csv",
+        "exchange_hour": output_root / "exchange_share_by_hour.csv",
     }
     pd.DataFrame(peak_rows).to_csv(paths["peak"], index=False)
     pd.DataFrame(monthly_rows).to_csv(paths["monthly"], index=False)
+    pd.DataFrame(station_rows).to_csv(paths["station"], index=False)
     pd.DataFrame(ratio_rows).to_csv(paths["ratio"], index=False)
     pd.DataFrame(gate_month_rows).to_csv(paths["gates_month"], index=False)
     pd.DataFrame(gate_hour_rows).to_csv(paths["gates_hour"], index=False)
+    pd.DataFrame(exchange_month_rows).to_csv(paths["exchange_month"], index=False)
+    pd.DataFrame(exchange_hour_rows).to_csv(paths["exchange_hour"], index=False)
     return paths
 
 
@@ -143,19 +211,83 @@ def build_diagnostic_figures(data, output_root: str | Path) -> dict[str, Path]:
     paths = {}
 
     gate_path = output_root / "gates_by_month.csv"
+    exchange_path = output_root / "exchange_share_by_month.csv"
     if gate_path.exists() and gate_path.stat().st_size:
         gates = pd.read_csv(gate_path)
         averaged = gates.groupby(["gate", "month"], as_index=False)["mean_gate"].mean()
-        fig, axis = plt.subplots(figsize=(9, 4.5))
+        has_exchange = exchange_path.exists() and exchange_path.stat().st_size
+        fig, axes = plt.subplots(2 if has_exchange else 1, 1, figsize=(9, 7 if has_exchange else 4.5))
+        axes = np.atleast_1d(axes)
+        axis = axes[0]
         for gate, group in averaged.groupby("gate"):
             axis.plot(group["month"], group["mean_gate"], marker="o", label=gate)
         axis.set(title="CPGE gate values by test month", xlabel="Month", ylabel="Mean gate value")
         axis.set_xticks(sorted(averaged["month"].unique()))
         axis.grid(alpha=0.25)
         axis.legend(ncol=3, frameon=False, fontsize=8)
+        if has_exchange:
+            exchange = pd.read_csv(exchange_path)
+            exchange_average = exchange.groupby(["gate", "month"], as_index=False)[
+                "mean_exchange_share"
+            ].mean()
+            share_axis = axes[1]
+            for gate, group in exchange_average.groupby("gate"):
+                share_axis.plot(
+                    group["month"], group["mean_exchange_share"], marker="o", label=gate
+                )
+            share_axis.set(
+                title="Transferred-feature share by test month",
+                xlabel="Month",
+                ylabel="Mean exchange share",
+            )
+            share_axis.set_xticks(sorted(exchange_average["month"].unique()))
+            share_axis.grid(alpha=0.25)
+            share_axis.legend(ncol=3, frameon=False, fontsize=8)
         fig.tight_layout()
         paths["gates"] = figure_dir / "cpge_gates_by_month.png"
         fig.savefig(paths["gates"], dpi=180)
+        plt.close(fig)
+
+    gate_hour_path = output_root / "gates_by_hour.csv"
+    exchange_hour_path = output_root / "exchange_share_by_hour.csv"
+    if gate_hour_path.exists() and gate_hour_path.stat().st_size:
+        gates = pd.read_csv(gate_hour_path)
+        averaged = gates.groupby(["gate", "hour"], as_index=False)["mean_gate"].mean()
+        has_exchange = exchange_hour_path.exists() and exchange_hour_path.stat().st_size
+        fig, axes = plt.subplots(
+            2 if has_exchange else 1, 1, figsize=(10, 7 if has_exchange else 4.5)
+        )
+        axes = np.atleast_1d(axes)
+        for gate, group in averaged.groupby("gate"):
+            axes[0].plot(group["hour"], group["mean_gate"], label=gate)
+        axes[0].set(
+            title="CPGE gate values by forecast-origin hour",
+            xlabel="Recorded local hour",
+            ylabel="Mean gate value",
+        )
+        axes[0].set_xticks(range(0, 24, 3))
+        axes[0].grid(alpha=0.25)
+        axes[0].legend(ncol=3, frameon=False, fontsize=8)
+        if has_exchange:
+            exchange = pd.read_csv(exchange_hour_path)
+            exchange_average = exchange.groupby(["gate", "hour"], as_index=False)[
+                "mean_exchange_share"
+            ].mean()
+            for gate, group in exchange_average.groupby("gate"):
+                axes[1].plot(
+                    group["hour"], group["mean_exchange_share"], label=gate
+                )
+            axes[1].set(
+                title="Transferred-feature share by forecast-origin hour",
+                xlabel="Recorded local hour",
+                ylabel="Mean exchange share",
+            )
+            axes[1].set_xticks(range(0, 24, 3))
+            axes[1].grid(alpha=0.25)
+            axes[1].legend(ncol=3, frameon=False, fontsize=8)
+        fig.tight_layout()
+        paths["gates_hour"] = figure_dir / "cpge_gates_by_hour.png"
+        fig.savefig(paths["gates_hour"], dpi=180)
         plt.close(fig)
 
     ratio_path = output_root / "ratio_forecast_by_month.csv"

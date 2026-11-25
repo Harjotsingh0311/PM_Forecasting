@@ -130,10 +130,27 @@ class CPGE(nn.Module):
         self.a_from_b = nn.Conv1d(channels, channels, 1)
         self.b_from_a = nn.Conv1d(channels, channels, 1)
 
-    def forward(self, a: torch.Tensor, b: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(
+        self, a: torch.Tensor, b: torch.Tensor
+    ) -> tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+    ]:
         joined = torch.cat([a, b], dim=1)
         gate_a, gate_b = torch.sigmoid(self.a_gate(joined)), torch.sigmoid(self.b_gate(joined))
-        return a + gate_a * self.a_from_b(b), b + gate_b * self.b_from_a(a), gate_a, gate_b
+        transfer_a = gate_a * self.a_from_b(b)
+        transfer_b = gate_b * self.b_from_a(a)
+        share_a = transfer_a.abs().mean(dim=-1) / (
+            a.abs().mean(dim=-1) + transfer_a.abs().mean(dim=-1) + 1e-6
+        )
+        share_b = transfer_b.abs().mean(dim=-1) / (
+            b.abs().mean(dim=-1) + transfer_b.abs().mean(dim=-1) + 1e-6
+        )
+        return a + transfer_a, b + transfer_b, gate_a, gate_b, share_a, share_b
 
 
 class CPMTCNLite(ForecastModel):
@@ -169,6 +186,7 @@ class CPMTCNLite(ForecastModel):
         self.register_buffer("target_log_std", target_log_std.float())
         self.register_buffer("target_raw_std", target_raw_std.float())
         self.last_gates: dict[str, torch.Tensor] = {}
+        self.last_exchange_shares: dict[str, torch.Tensor] = {}
         self.soft_output = soft_output
         # Populated only by the soft-output variant during forward().  Leaving
         # this as None for hard-constraint models avoids mixing a CPU scalar
@@ -184,14 +202,20 @@ class CPMTCNLite(ForecastModel):
         coarse = torch.cat([cp, common, context], dim=-1).transpose(1, 2)
         fine, coarse = self.fine_stem(fine), self.coarse_stem(coarse)
         gate_readout: dict[str, torch.Tensor] = {}
+        share_readout: dict[str, torch.Tensor] = {}
         for level, (fine_block, coarse_block) in enumerate(zip(self.fine_blocks, self.coarse_blocks, strict=True)):
             fine, coarse = fine_block(fine), coarse_block(coarse)
             key = str(level)
             if self.use_cpge and key in self.exchanges:
-                fine, coarse, gate_fine, gate_coarse = self.exchanges[key](fine, coarse)
+                fine, coarse, gate_fine, gate_coarse, share_fine, share_coarse = (
+                    self.exchanges[key](fine, coarse)
+                )
                 gate_readout[f"fine_{level}"] = gate_fine.mean(dim=-1).detach()
                 gate_readout[f"coarse_{level}"] = gate_coarse.mean(dim=-1).detach()
+                share_readout[f"fine_{level}"] = share_fine.detach()
+                share_readout[f"coarse_{level}"] = share_coarse.detach()
         self.last_gates = gate_readout
+        self.last_exchange_shares = share_readout
 
         pm25_norm = self.fine_head(fine[..., -1])
         mean25 = self.target_log_mean[station, 0].unsqueeze(1)
@@ -247,4 +271,18 @@ def make_model(name: str, data, config: dict) -> nn.Module:
 
 def parameter_count(model: nn.Module) -> int:
     return sum(parameter.numel() for parameter in model.parameters())
+
+
+def load_compatible_state(model: nn.Module, state: dict[str, torch.Tensor], name: str) -> None:
+    """Load checkpoints created before the optional soft-output head was added."""
+    missing, unexpected = model.load_state_dict(state, strict=False)
+    allowed_missing = (
+        {"target_raw_std", "pm10_head.weight", "pm10_head.bias"}
+        if name in {"cpmtcn", "cpmtcn_no_exchange"}
+        else set()
+    )
+    if set(missing) - allowed_missing or unexpected:
+        raise RuntimeError(
+            f"Incompatible checkpoint for {name}: missing={missing}, unexpected={unexpected}"
+        )
 

@@ -110,9 +110,12 @@ def run_cross_pollutant_statistics(data, output_dir: str | Path) -> dict[str, Pa
     for station_idx, station in enumerate(data.stations):
         station_fine = np.log1p(fine[:, station_idx].astype(np.float64))
         station_coarse = np.log1p(coarse[:, station_idx].astype(np.float64))
-        # Contemporaneous weather plus calendar controls. These are association
-        # diagnostics, not inputs to the operational forecast at future times.
-        controls = data.features[:, station_idx, 4:17].astype(np.float64)
+        weather = data.features[:, station_idx, 4:13].astype(np.float64)
+        calendar = data.features[:, station_idx, 13:17].astype(np.float64)
+        lagged_weather = np.vstack([np.full((1, weather.shape[1]), np.nan), weather[:-1]])
+        # Remove calendar structure and the effect of weather known one hour
+        # earlier, matching the proposal's past-weather conditioning rule.
+        controls = np.column_stack([lagged_weather, calendar])
         valid = (
             np.isfinite(station_fine)
             & np.isfinite(station_coarse)
@@ -128,7 +131,7 @@ def run_cross_pollutant_statistics(data, output_dir: str | Path) -> dict[str, Pa
                     "lag_hours": lag,
                     "pair": "PM2.5-coarse",
                     "correlation": fine_series.corr(coarse_series.shift(lag)),
-                    "conditioning": "weather+calendar ridge residuals",
+                    "conditioning": "past-weather+calendar ridge residuals",
                 }
             )
 
@@ -137,7 +140,9 @@ def run_cross_pollutant_statistics(data, output_dir: str | Path) -> dict[str, Pa
         fine_diff = np.diff(station_fine, prepend=np.nan)
         coarse_diff = np.diff(station_coarse, prepend=np.nan)
         for conditioned in (False, True):
-            test_controls = controls if conditioned else None
+            # _nested_f_test selects controls at t-1, so use the unshifted
+            # weather/calendar matrix here.
+            test_controls = np.column_stack([weather, calendar]) if conditioned else None
             for response, own, other, direction in (
                 (coarse_diff, coarse_diff, fine_diff, "PM2.5 -> coarse"),
                 (fine_diff, fine_diff, coarse_diff, "coarse -> PM2.5"),

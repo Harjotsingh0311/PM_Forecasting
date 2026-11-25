@@ -159,6 +159,7 @@ def forecast_test(model, data, config: dict) -> dict[str, np.ndarray]:
     origins = data.origins.test[:: config["data"]["eval_stride"]]
     origin_values, station_values = _pairs(origins, len(data.stations), 1)
     predictions, truths, masks, gate_batches = [], [], [], []
+    gate_channel_batches, share_batches, share_channel_batches = [], [], []
     gate_names: list[str] = []
     log_mean = torch.as_tensor(data.target_log_mean, device=device)
     log_std = torch.as_tensor(data.target_log_std, device=device)
@@ -173,11 +174,15 @@ def forecast_test(model, data, config: dict) -> dict[str, np.ndarray]:
         if getattr(model, "last_gates", None):
             if not gate_names:
                 gate_names = sorted(model.last_gates)
-            gate_batches.append(
-                torch.stack([model.last_gates[name].mean(dim=1) for name in gate_names], dim=1)
-                .cpu()
-                .numpy()
-            )
+            gate_channels = torch.stack([model.last_gates[name] for name in gate_names], dim=1)
+            gate_channel_batches.append(gate_channels.cpu().numpy())
+            gate_batches.append(gate_channels.mean(dim=2).cpu().numpy())
+            if getattr(model, "last_exchange_shares", None):
+                share_channels = torch.stack(
+                    [model.last_exchange_shares[name] for name in gate_names], dim=1
+                )
+                share_channel_batches.append(share_channels.cpu().numpy())
+                share_batches.append(share_channels.mean(dim=2).cpu().numpy())
         predictions.append(prediction.cpu().numpy())
         truths.append(target_raw.cpu().numpy())
         masks.append(mask.cpu().numpy())
@@ -191,6 +196,10 @@ def forecast_test(model, data, config: dict) -> dict[str, np.ndarray]:
     if gate_batches:
         result["gate_names"] = np.asarray(gate_names)
         result["gate_values"] = np.concatenate(gate_batches)
+        result["gate_channel_values"] = np.concatenate(gate_channel_batches)
+    if share_batches:
+        result["exchange_share_values"] = np.concatenate(share_batches)
+        result["exchange_share_channel_values"] = np.concatenate(share_channel_batches)
     return result
 
 
