@@ -7,6 +7,7 @@ data:
   raw_dir: data/raw
   cache_path: data/processed/dataset.npz
   metadata_path: data/processed/metadata.json
+  model_cache_dir: data/model_cache
   timezone: Europe/Ljubljana
   timestamps_are_utc: false
   input_length: 168
@@ -28,6 +29,7 @@ model:
   hidden_size: 64
   station_embedding: 8
   dropout: 0.1
+  physical_hinge_weight: 0.1
 
 training:
   seeds: [42, 123]

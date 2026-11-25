@@ -53,7 +53,7 @@ def build_summary(output_root: str | Path) -> tuple[pd.DataFrame, Path]:
     figure_dir = output_root / "figures"
     figure_dir.mkdir(parents=True, exist_ok=True)
     figure_path = figure_dir / "rmse_by_horizon.png"
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4), sharex=True)
+    fig, axes = plt.subplots(1, 2, figsize=(13, 5), sharex=True)
     for axis, pollutant in zip(axes, ["PM2.5", "PM10"], strict=True):
         subset = metrics[metrics["pollutant"] == pollutant]
         for model, group in subset.groupby("model"):
@@ -63,8 +63,9 @@ def build_summary(output_root: str | Path) -> tuple[pd.DataFrame, Path]:
         axis.set_xlabel("Forecast horizon (hours)")
         axis.set_ylabel("RMSE (µg/m³)")
         axis.grid(alpha=0.25)
-    axes[-1].legend(frameon=False, fontsize=8)
-    fig.tight_layout()
+    handles, labels = axes[-1].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=4, frameon=False, fontsize=8)
+    fig.tight_layout(rect=(0, 0.16, 1, 1))
     fig.savefig(figure_path, dpi=180)
     plt.close(fig)
     return metrics, figure_path

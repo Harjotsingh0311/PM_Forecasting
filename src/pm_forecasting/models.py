@@ -147,10 +147,12 @@ class CPMTCNLite(ForecastModel):
         horizon: int,
         target_log_mean: torch.Tensor,
         target_log_std: torch.Tensor,
+        target_raw_std: torch.Tensor,
         channels: int = 32,
         station_embedding: int = 8,
         dropout: float = 0.1,
         use_cpge: bool = True,
+        soft_output: bool = False,
     ):
         super().__init__(n_stations, station_embedding, horizon)
         tower_features = 2 + len(self.common_indices) + station_embedding
@@ -162,9 +164,16 @@ class CPMTCNLite(ForecastModel):
         self.use_cpge = use_cpge
         self.fine_head = nn.Linear(channels, horizon)
         self.coarse_head = nn.Linear(channels, horizon)
+        self.pm10_head = nn.Linear(channels, horizon)
         self.register_buffer("target_log_mean", target_log_mean.float())
         self.register_buffer("target_log_std", target_log_std.float())
+        self.register_buffer("target_raw_std", target_raw_std.float())
         self.last_gates: dict[str, torch.Tensor] = {}
+        self.soft_output = soft_output
+        # Populated only by the soft-output variant during forward().  Leaving
+        # this as None for hard-constraint models avoids mixing a CPU scalar
+        # into a CUDA loss.
+        self.constraint_penalty: torch.Tensor | None = None
 
     def forward(self, x: torch.Tensor, station: torch.Tensor, cp: torch.Tensor | None = None) -> torch.Tensor:
         if cp is None:
@@ -188,6 +197,14 @@ class CPMTCNLite(ForecastModel):
         mean25 = self.target_log_mean[station, 0].unsqueeze(1)
         std25 = self.target_log_std[station, 0].unsqueeze(1)
         pm25_raw = torch.expm1(pm25_norm * std25 + mean25).clamp_min(0)
+        if self.soft_output:
+            pm10_norm = self.pm10_head(coarse[..., -1])
+            mean10 = self.target_log_mean[station, 1].unsqueeze(1)
+            std10 = self.target_log_std[station, 1].unsqueeze(1)
+            pm10_raw = torch.expm1(pm10_norm * std10 + mean10).clamp_min(0)
+            raw_scale = self.target_raw_std[station, 1].unsqueeze(1).clamp_min(1.0)
+            self.constraint_penalty = (F.relu(pm25_raw - pm10_raw) / raw_scale).mean()
+            return torch.stack([pm25_norm, pm10_norm], dim=-1)
         coarse_raw = F.softplus(self.coarse_head(coarse[..., -1]))
         pm10_raw = pm25_raw + coarse_raw
         mean10 = self.target_log_mean[station, 1].unsqueeze(1)
@@ -214,14 +231,16 @@ def make_model(name: str, data, config: dict) -> nn.Module:
         return TCN(**common, channels=options.get("channels", 32))
     if name == "ebamtn":
         return EBAMTN(**common, channels=options.get("channels", 32), hidden_size=options.get("hidden_size", 64))
-    if name in {"cpmtcn", "cpmtcn_no_exchange"}:
+    if name in {"cpmtcn", "cpmtcn_no_exchange", "cpmtcn_soft"}:
         common.pop("n_features")
         return CPMTCNLite(
             **common,
             target_log_mean=torch.as_tensor(data.target_log_mean),
             target_log_std=torch.as_tensor(data.target_log_std),
+            target_raw_std=torch.as_tensor(data.target_raw_std),
             channels=options.get("channels", 32),
-            use_cpge=name == "cpmtcn",
+            use_cpge=name != "cpmtcn_no_exchange",
+            soft_output=name == "cpmtcn_soft",
         )
     raise ValueError(f"Unknown model: {name}")
 

@@ -11,6 +11,7 @@ dependencies = [
   "numpy>=2.0",
   "pandas>=2.2",
   "scikit-learn>=1.5",
+  "scipy>=1.14",
   "PyYAML>=6.0",
   "matplotlib>=3.9",
   "torch>=2.8",
@@ -19,6 +20,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8.3", "ruff>=0.8"]
 boosting = ["lightgbm>=4.5"]
+foundation = ["chronos-forecasting>=2.3,<3"]
 
 [project.scripts]
 pm-forecast = "pm_forecasting.cli:main"

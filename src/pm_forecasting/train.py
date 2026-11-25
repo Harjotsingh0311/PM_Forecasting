@@ -67,6 +67,9 @@ def validation_loss(model, store, origins, data, config, device) -> float:
         x, cp, target_norm, target_raw, mask = store.batch(batch_origins, batch_stations)
         prediction = model(x, batch_stations, cp)
         loss = composite_loss(prediction, target_norm, target_raw, mask, batch_stations, *tensors)
+        penalty = getattr(model, "constraint_penalty", None)
+        if penalty is not None:
+            loss = loss + config["model"].get("physical_hinge_weight", 0.1) * penalty
         losses.append(float(loss))
     return float(np.mean(losses))
 
@@ -108,6 +111,9 @@ def train_model(model_name: str, data, config: dict, seed: int) -> dict:
             with torch.amp.autocast("cuda", dtype=torch.float16, enabled=training["amp"]):
                 prediction = model(x, batch_stations, cp)
                 loss = composite_loss(prediction, target_norm, target_raw, mask, batch_stations, *stats)
+                penalty = getattr(model, "constraint_penalty", None)
+                if penalty is not None:
+                    loss = loss + config["model"].get("physical_hinge_weight", 0.1) * penalty
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), training["gradient_clip"])

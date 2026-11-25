@@ -7,13 +7,17 @@ import torch
 from pm_forecasting.models import make_model
 
 
-@pytest.mark.parametrize("name", ["cnn", "lstm", "tcn", "ebamtn", "cpmtcn", "cpmtcn_no_exchange"])
+@pytest.mark.parametrize(
+    "name",
+    ["cnn", "lstm", "tcn", "ebamtn", "cpmtcn", "cpmtcn_no_exchange", "cpmtcn_soft"],
+)
 def test_model_output_shapes(name):
     data = SimpleNamespace(
         features=np.zeros((200, 3, 17), dtype=np.float32),
         stations=["A", "B", "C"],
         target_log_mean=np.zeros((3, 2), dtype=np.float32),
         target_log_std=np.ones((3, 2), dtype=np.float32),
+        target_raw_std=np.ones((3, 2), dtype=np.float32),
     )
     config = {
         "data": {"horizon": 24},
@@ -28,4 +32,8 @@ def test_model_output_shapes(name):
     assert torch.isfinite(prediction).all()
     if name == "cpmtcn":
         assert len(model.last_gates) == 6
+    if name == "cpmtcn_soft":
+        assert model.constraint_penalty is not None
+        assert model.constraint_penalty.ndim == 0
+        assert model.constraint_penalty >= 0
 
